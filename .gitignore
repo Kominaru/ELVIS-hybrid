@@ -1,0 +1,13 @@
+./geckodriver.log
+tripadvisor_reviews_scraper/*
+barcelona.csv
+foo.csv
+madrid.csv
+manchester.csv
+newyork.csv
+paris.csv
+sydney.csv
+tokyo.csv
+*.cfg
+.log
+losangeles.csv
