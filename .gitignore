@@ -11,3 +11,10 @@ tokyo.csv
 *.cfg
 .log
 losangeles.csv
+docs/
+data/
+ferrol_test/
+losangeles/
+*.pyc
+models/
+.idea/

@@ -12,11 +12,12 @@ import requests
 from io import BytesIO
 from time import sleep
 import sys
+from random import choice
 
 def extract_user_id(raw_user_id):
     return raw_user_id.split('_')[1][:-4]
 
-city="ferrol_test"
+city="losangeles"
 
 makedirs(f"{city}/IMGMODEL/data_10+10/",exist_ok=True)
 makedirs(f"{city}/IMGMODEL/original_take/",exist_ok=True)
@@ -55,12 +56,15 @@ df["content"]=df.apply(lambda x : x.review_full if x["photos"]=="" else x["photo
 df = df.drop(["review_full","photos"],axis=1)
 
 #Fabricate review IDs
+df=df[df["content"].notna()]
 df["content_id"]=np.arange(0,df.shape[0]).tolist()
 df = df.drop('review_id',axis=1)
 
 print(min(df["content_id"]))
+
+print(max(df["content_id"]))
 #Add text/image flag
-df=df[df["content"].notna()]
+
 df["is_image"]=df.apply(lambda x: 1 if x.content[:5]=="https" else 0,axis=1)
 
 #Separate the contents to start translation, drop column from df
@@ -175,6 +179,8 @@ else:
         train=pd.concat([data,test]).drop_duplicates(keep=False)
         return train, test
     
+    df=df[df["is_image"]==0]
+    
     train_and_val,test=separate_train_test(df)
     train,val=separate_train_test(train_and_val)
     
@@ -210,15 +216,74 @@ else:
     #==================================
     #Mark all existing reviews as positive samples
     #==================================
+    train=train.drop(["num_images"],axis=1)
+    train_and_val=train_and_val.drop(["num_images"],axis=1)
+    val=val.drop(["num_images"],axis=1)
+    test=test.drop(["num_images"],axis=1)
+
     train["take"]=1
     train_and_val["take"]=1
     val["is_dev"]=1
     test["is_dev"]=1
     print(test.shape)
     
+    merge=train_and_val.merge(test,left_on=["user_id","restaurant_id","content_id"], right_on=["user_id","restaurant_id","content_id"])
+    print(merge[merge["take"]== merge["is_dev"]])
+    print(merge)
+
+
+    with open("data/"+city+"/IMGMODEL/data_10+10/CONTENTS", "rb") as f:
+        array=pickle.load(f)
+        text_contentids=train[train["is_image"]==0]["content_id"].to_numpy()
     #==================================
     #Oversample training sets (TRAIN and TRAIN+VAL)
     #==================================
+    def oversample_trainset1(train,test=0):
+
+        restaurant_groups = train.groupby(["restaurant_id","is_image"])
+        newtrain=train.copy()
+        i=0
+        rows=[]
+        image_restaurant_ids=pd.unique(train[train["is_image"]==1]["restaurant_id"].to_list())
+        text_restaurant_ids=pd.unique(train[train["is_image"]==0]["restaurant_id"].to_list())
+        for index, row in train.iterrows():
+            if index%10000==0: print(i)
+            # print(row)
+            #For each review (u,r), add then negative samples (u,r') where r' is a photo of the **same** restaurant taken by a different user u'
+            # same_restaurant=(train.loc[(train["user_id"]!=row["user_id"]) & (train["restaurant_id"]==row["restaurant_id"])]).copy()ç
+            sampled_rows=restaurant_groups.get_group((row["restaurant_id"],row["is_image"])).copy()
+            sampled_rows=sampled_rows[sampled_rows["user_id"]!=row["user_id"]]
+            if not sampled_rows.empty: 
+                sampled_rows=sampled_rows.sample(n=10,replace=True)
+                sampled_rows["content_id"]=row["content_id"]
+                sampled_rows["take"]=0
+                sampled_rows=sampled_rows.to_dict(orient='records')
+
+                for e in sampled_rows:
+                    rows.append(e)
+            
+            #For each review (u,r), add then negative samples (u,r') where r' is a photo of a **different** restaurant taken by a different user u'
+            different_restaurant_id=row["restaurant_id"]
+            for _ in range(10):
+                while different_restaurant_id==row["restaurant_id"]:
+                    different_restaurant_id = choice(image_restaurant_ids) if row["is_image"] else choice(text_restaurant_ids)
+                sampled_rows=restaurant_groups.get_group((different_restaurant_id,row["is_image"])).copy()
+                sampled_rows=sampled_rows[sampled_rows["user_id"]!=row["user_id"]]
+                if not sampled_rows.empty:
+                    sampled_rows=sampled_rows.sample(n=1)
+                    sampled_rows["content_id"]=row["content_id"]
+                    sampled_rows["take"]=0
+                    sampled_rows=sampled_rows.to_dict(orient='records')
+                    for e in sampled_rows:
+                        rows.append(e)    
+                
+            #Oversample the original review to compensate for the negative samples added
+            row=row.to_dict()
+            for _ in range(19):
+                rows.append(row)
+            i+=1
+        return newtrain.append(pd.DataFrame(rows),ignore_index=True)
+        
     def oversample_trainset(train):
         rows=[]
         newtrain=train.copy()
@@ -226,9 +291,9 @@ else:
         for index, row in train.iterrows():
             # print(row)
             #For each review (u,r), add then negative samples (u,r') where r' is a photo of the **same** restaurant taken by a different user u'
-            same_restaurant=(train.loc[(train["user_id"]!=row["user_id"]) & (train["restaurant_id"]==row["restaurant_id"])]).copy()
+            same_restaurant=(train.loc[(train["user_id"]!=row["user_id"]) & (train["restaurant_id"]==row["restaurant_id"]) & (train["is_image"]==row["is_image"])]).copy()
             if not same_restaurant.empty: same_restaurant=same_restaurant.sample(n=10,replace=True)
-            same_restaurant["rvw_id"]=row["rvw_id"]
+            same_restaurant["content_id"]=row["content_id"]
             same_restaurant["take"]=0
             same_restaurant=same_restaurant.to_dict(orient='records')
             # print(same_restaurant)
@@ -238,9 +303,9 @@ else:
             # newtrain=newtrain.append(same_restaurant,ignore_index=True)
             
             #For each review (u,r), add then negative samples (u,r') where r' is a photo of a **different** restaurant taken by a different user u'
-            different_restaurant=(train.loc[(train["user_id"]!=row["user_id"]) & (train["restaurant_id"]!=row["restaurant_id"])]).copy()
+            different_restaurant=(train.loc[(train["user_id"]!=row["user_id"]) & (train["restaurant_id"]!=row["restaurant_id"]) & (train["is_image"]==row["is_image"])]).copy()
             different_restaurant=different_restaurant.sample(n=10,replace=True)
-            different_restaurant["rvw_id"]=row["rvw_id"]
+            different_restaurant["content_id"]=row["content_id"]
             different_restaurant["take"]=0
             
             different_restaurant=different_restaurant.to_dict(orient='records')
@@ -251,27 +316,58 @@ else:
             for r in range(19):
                 rows.append(row.to_dict())
             i+=1
-        aux=pd.DataFrame.from_records(rows)
         return newtrain.append(pd.DataFrame(rows),ignore_index=True)
-        
         
     print(train.shape)
     oversampled_train=oversample_trainset(train)
-    os.makedirs(city+"/data_10+10",exist_ok=True)
-    print("hey")
-    with open(city+"/data_10+10/TRAIN_TXT", "wb") as f:
+    print(oversampled_train[-100:].to_dict)
+    input()
+    print("FINISHED OVERSAMPLING TRAIN")
+    with open(city+"/IMGMODEL/data_10+10/TRAIN_TXT", "wb") as f:
         pickle.dump(oversampled_train, f)
     print(oversampled_train.shape)
     
     print(train_and_val)
-    oversampled_train_and_val=oversample_trainset(train_and_val)
-    with open(city+"/data_10+10/TRAIN_DEV_TXT", "wb") as f:
+    oversampled_train_and_val=oversample_trainset(train_and_val,test=True)
+    with open(city+"/IMGMODEL/data_10+10/TRAIN_DEV_TXT", "wb") as f:
         pickle.dump(oversampled_train_and_val, f)
     
     #==================================
     # Oversample Test sets (VAL and TEST)
     #==================================
     
+    def oversample_testset1(test,train):
+        restaurant_groups = train.groupby(["restaurant_id","is_image"])
+        i=0
+        rows=[]
+        id_test=0
+        image_restaurant_ids=pd.unique(train[train["is_image"]==1]["restaurant_id"].to_list())
+        text_restaurant_ids=pd.unique(train[train["is_image"]==0]["restaurant_id"].to_list())
+        for _, row in test.iterrows():
+            if id_test%10000==0: print
+            id_test+=1
+            r=row.to_dict()
+            r["id_test"]=id_test
+            
+            if (row["restaurant_id"],row["is_image"]) in restaurant_groups.groups:
+                restaurant=restaurant_groups.get_group((row["restaurant_id"],row["is_image"])).copy()
+                restaurant=restaurant[restaurant["user_id"]!=row["user_id"]]
+                if restaurant.shape[0]>100: restaurant=restaurant.sample(n=100)
+                restaurant["user_id"]=row["user_id"]
+                restaurant.rename(columns={'take':'is_dev'}, inplace=True)
+                restaurant["is_dev"]=0
+                restaurant["id_test"]=id_test
+                if restaurant.shape[0]!=0:
+                    rows.append(row.to_dict())
+                    restaurant=restaurant.to_dict(orient='records')
+                    for e in restaurant:
+                        rows.append(e)
+
+        print("finished oversampling")
+        aux=pd.DataFrame.from_records(rows)
+        print("created df")
+        return aux
+
     def oversample_testset(test,train):
         rows=[]
         id_test=0
@@ -282,7 +378,7 @@ else:
             
             
             #For each review (u,r), add negative samples (u,r') for all photos r' taken of the **same** restaurant by a different user.
-            same_restaurant=(train.loc[(train["user_id"]!=row["user_id"]) & (train["restaurant_id"]==row["restaurant_id"])]).copy()
+            same_restaurant=(train.loc[(train["user_id"]!=row["user_id"]) & (train["restaurant_id"]==row["restaurant_id"]) & (train["is_image"]==row["is_image"])]).copy()
             
             if same_restaurant.shape[0]>100: same_restaurant=same_restaurant.sample(n=100)
             if id_test%10000==0: print
@@ -302,18 +398,18 @@ else:
         aux=pd.DataFrame.from_records(rows)
         print("created df")
         return aux
-        
+          
     print(val.shape)
     oversampled_val=oversample_testset(val,train)
     print("done")
     
-    with open(city+"/data_10+10/DEV_TXT", "wb") as f:
+    with open(city+"/IMGMODEL/data_10+10/DEV_TXT", "wb") as f:
         pickle.dump(oversampled_val, f)
     print(oversampled_val.shape)
     
     print(test.shape)
     oversampled_test=oversample_testset(test,train_and_val)
-    with open(city+"/data_10+10/TEST_TXT", "wb") as f:
+    with open(city+"/IMGMODEL/data_10+10/TEST_TXT", "wb") as f:
         pickle.dump(oversampled_test, f)
     print(oversampled_test.shape)
     
@@ -325,13 +421,18 @@ else:
     information+=str("DEV: "+ str(oversampled_val.shape[0])+" "+ str(oversampled_val.loc[oversampled_val["is_dev"]==1].shape[0])+ " "+ str(oversampled_val.loc[oversampled_val["is_dev"]==0].shape[0])+"\n")
     information+=str("TEST: "+ str(oversampled_test.shape[0])+" "+ str(oversampled_test.loc[oversampled_test["is_dev"]==1].shape[0])+ " "+ str(oversampled_test.loc[oversampled_test["is_dev"]==0].shape[0])+"\n")
     
+    print(information)
+
+    merge=oversampled_train_and_val.merge(oversampled_test,left_on=["user_id","restaurant_id","content_id"], right_on=["user_id","restaurant_id","content_id"])
+    print(merge[(merge["take"]==1) & (merge["is_dev"]==1)])
+    print(merge)
     #==================================
     # Save pickles for the Embedding Size and Unique user counts
     #==================================
     v_img=768
-    with open(city+"/data_10+10/V_TXT", "wb") as f:
+    with open(city+"/IMGMODEL/data_10+10/V_TXT", "wb") as f:
         pickle.dump(v_img, f)
         
-    n_usr=pd.unique(data["user_id"]).shape[0]
-    with open(city+"/data_10+10/N_USR", "wb") as f:
+    n_usr=pd.unique(df["user_id"]).shape[0]
+    with open(city+"/IMGMODEL/data_10+10/N_USR", "wb") as f:
         pickle.dump(n_usr, f)
