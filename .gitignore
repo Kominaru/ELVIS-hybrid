@@ -18,3 +18,14 @@ losangeles/
 *.pyc
 models/
 .idea/
+*.pkl
+*.pdf
+**/DEV_TXT*
+**/CONTENTS*
+**/DEV*
+**/TEST*
+**/TRAIN*
+**/N_USR*
+**/V_TXT*
+**/*.csv
+*.txt

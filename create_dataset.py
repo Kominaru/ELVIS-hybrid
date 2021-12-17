@@ -17,30 +17,33 @@ from random import choice
 def extract_user_id(raw_user_id):
     return raw_user_id.split('_')[1][:-4]
 
-city="losangeles"
+city="delhi"
 
 makedirs(f"{city}/IMGMODEL/data_10+10/",exist_ok=True)
 makedirs(f"{city}/IMGMODEL/original_take/",exist_ok=True)
 
 #Read CSV
 df=pd.read_csv(f"{city}.csv")
-
+df["photos"]=pd.Series(dtype=object)
+print(df["photos"])
 #Drop irrelevant columns
 df=df.drop(['parse_count','author','sample','rating_review','title_review','review_preview','url_review','date','city','url_restaurant'],axis=1)
+print(f"Total review count after removing invalid userids: {df.shape[0]} -> ",end="")
 df = df[df['user_id'].notna()] #Purge invalid user ids
-
+print(f"{df.shape[0]}")
 # df = df[df['rating_review']>3]
 
 #Created fabricated user_ids
 df["user_id"]=df["user_id"].apply(extract_user_id)
 df = df.assign(user_id=(df["user_id"]).astype('category').cat.codes)
-
+print(f"Total unique users: {df['user_id'].unique().shape[0]}")
 #Create fabricated restaurant IDs
 df = df.assign(restaurant_id=(df["restaurant_name"]).astype('category').cat.codes)
 df = df.drop('restaurant_name',axis=1)
+print(f"Total unique restaurants: {df['restaurant_id'].unique().shape[0]}")
 
 #Split photos column into actual lists
-df = df[df["user_id"].isin(df[df["photos"].notna()]['user_id'].unique())]
+# df = df[df["user_id"].isin(df[df["photos"].notna()]['user_id'].unique())]
 df = df.assign(photos=df.photos.str.split(','))
 df["photos"]=df["photos"].apply(lambda x: [""] if x is NaN else x+[""] ) #We add an additional element to each list so we can have a row for the review as well
 
@@ -50,19 +53,22 @@ df=pd.DataFrame({
  for col in df.columns.difference(["photos"])
   }).assign(**{"photos":np.concatenate(df["photos"].values)})[df.columns.tolist()]
 
+print("="*50)
+print("Exploding dataset...")
 
+print("Total contents: ", df.shape[0], " | Total images: ",  df[df["photos"]!=""].shape[0], " | Total texts: ",  df[(df["photos"]=="") & (df["review_full"].notna())].shape[0])
 #Collapse the review and image columns into one content column
+print("="*50)
+print("Creating is_image flag, merging image url and texts into content column...")
 df["content"]=df.apply(lambda x : x.review_full if x["photos"]=="" else x["photos"],axis=1)
 df = df.drop(["review_full","photos"],axis=1)
 
 #Fabricate review IDs
+print(f"Total review count after removing invalid userids: {df.shape[0]} -> ",end="")
 df=df[df["content"].notna()]
 df["content_id"]=np.arange(0,df.shape[0]).tolist()
 df = df.drop('review_id',axis=1)
-
-print(min(df["content_id"]))
-
-print(max(df["content_id"]))
+print(df.shape[0])
 #Add text/image flag
 
 df["is_image"]=df.apply(lambda x: 1 if x.content[:5]=="https" else 0,axis=1)
@@ -71,7 +77,15 @@ df["is_image"]=df.apply(lambda x: 1 if x.content[:5]=="https" else 0,axis=1)
 contents=df["content"].to_numpy()
 df = df.drop('content',axis=1)
 
+
+#Get separate image and text arrays
+images=contents[df["is_image"]==1]
+texts=contents[df["is_image"]==0]
+
+print("Final contents: ", df.shape[0], " | Final images: ",  images.shape[0], " | Final texts: ", texts.shape[0])
+
 if sys.argv[1]=="embeds":
+    print("Creating ",contents.shape[0], " embeds")
     from transformers import BertTokenizer, TFBertModel
     from keras.applications.inception_resnet_v2 import InceptionResNetV2, preprocess_input
     from keras.layers import Input
@@ -92,16 +106,9 @@ if sys.argv[1]=="embeds":
 
 
 
-    print("Total number of contents:", df.shape[0])
-    #Get separate image and text arrays
-    images=contents[df["is_image"]==1]
-    texts=contents[df["is_image"]==0]
-
-    print("Total number of images:", images.shape[0])
-    print("Total number of texts:", texts.shape[0])
 
     def translate(text): 
-        return text_model(tokenizer(list(text), return_tensors='tf',padding=True, truncation=True))[1].numpy()
+        return text_model(tokenizer(text, return_tensors='tf',padding=True, truncation=True))[1].numpy()
 
     def loadImage(URL):
         errored=False
@@ -128,31 +135,25 @@ if sys.argv[1]=="embeds":
         
         return img
 
-    def embed_image(batch):
-        loaded_batch=np.array(list(map(loadImage,batch)))
-        loaded_batch=np.squeeze(loaded_batch)
-        return image_model.predict(loaded_batch)
-
-
-    texts=np.array_split(texts, texts.shape[0]//64+1)
-    images=np.array_split(images, images.shape[0]//16+1)
+    def embed_image(img):
+        return image_model.predict(loadImage(img))
 
     new_texts=[]
     new_images=[]
 
     for i,batch in enumerate(images):
-        print(f"\033[K Processing images... batch {i+1}/{len(images)}",end="\r")
+        print(f"\033[K Processing images... image {i+1}/{len(images)}",end="\r")
         new_images.append(embed_image(batch))
 
-    new_images=np.vstack(new_images)
+    # new_images=np.vstack(new_images)
     contents=np.zeros((contents.shape[0],1536))
 
-    images_mask=(df["is_image"]==1).to_numpy()
-    contents[images_mask]=new_images
+    # images_mask=(df["is_image"]==1).to_numpy()
+    # contents[images_mask]=new_images
 
     print("\n")
     for i,batch in enumerate(texts):
-        print(f"\033[K Processing texts... batch {i+1}/{len(texts)}",end="\r")
+        print(f"\033[K Processing texts... text {batch[:50]} ({i+1}/{len(texts)})",end="\r")
         new_texts.append(translate(batch))
 
 
@@ -173,9 +174,11 @@ else:
     def separate_train_test(data):
         counts_images = data[df["is_image"]==1]["user_id"].value_counts()
         counts_texts = data[df["is_image"]==0]["user_id"].value_counts()
+        print(f"Splitting {data.shape[0]} rows. Eligible for test: {counts_images[counts_images.gt(1)].shape[0]} im-users and {counts_texts[counts_texts.gt(1)].shape[0]} txt-users")
         morethan2=data[((data["user_id"].isin(counts_images.index[counts_images.gt(1)]))&(data["is_image"]==1))|((data["user_id"].isin(counts_texts.index[counts_texts.gt(1)]))&(data["is_image"]==0))]
         test=morethan2.groupby(['user_id','is_image']).nth(0).reset_index()
-        print(test)
+        print(f"Total test samples: {test.shape[0]}")
+        input()
         train=pd.concat([data,test]).drop_duplicates(keep=False)
         return train, test
     
@@ -203,6 +206,8 @@ else:
     information+=str("DEV: "+ str(val.shape[0])+" "+ str(pd.unique(val["user_id"]).shape[0])+ " "+ str(pd.unique(val["restaurant_id"]).shape[0])+"\n")
     information+=str("TEST: "+ str(test.shape[0])+" "+ str(pd.unique(test["user_id"]).shape[0])+ " "+ str(pd.unique(test["restaurant_id"]).shape[0])+"\n")
     
+    print(information)
+
     with open(city+"/IMGMODEL/original_take/TRAIN_DEV", "wb") as f:
         pickle.dump(train_and_val, f)
     with open(city+"/IMGMODEL/original_take/TRAIN_TEST", "wb") as f:
@@ -227,18 +232,15 @@ else:
     test["is_dev"]=1
     print(test.shape)
     
+
     merge=train_and_val.merge(test,left_on=["user_id","restaurant_id","content_id"], right_on=["user_id","restaurant_id","content_id"])
-    print(merge[merge["take"]== merge["is_dev"]])
-    print(merge)
+    merge1=train.merge(val,left_on=["user_id","restaurant_id","content_id"], right_on=["user_id","restaurant_id","content_id"])
+    print(f"Overlapping samples: {merge.shape[0]} (TRAIN_DEV - TEST), {merge1.shape[0]} (TRAIN - DEV)")
 
-
-    with open("data/"+city+"/IMGMODEL/data_10+10/CONTENTS", "rb") as f:
-        array=pickle.load(f)
-        text_contentids=train[train["is_image"]==0]["content_id"].to_numpy()
     #==================================
     #Oversample training sets (TRAIN and TRAIN+VAL)
     #==================================
-    def oversample_trainset1(train,test=0):
+    def oversample_trainset_new(train):
 
         restaurant_groups = train.groupby(["restaurant_id","is_image"])
         newtrain=train.copy()
@@ -284,7 +286,8 @@ else:
             i+=1
         return newtrain.append(pd.DataFrame(rows),ignore_index=True)
         
-    def oversample_trainset(train):
+    def oversample_trainset_old(train):
+        print("Overampling train set with traditional method...")
         rows=[]
         newtrain=train.copy()
         i=0
@@ -318,17 +321,16 @@ else:
             i+=1
         return newtrain.append(pd.DataFrame(rows),ignore_index=True)
         
-    print(train.shape)
-    oversampled_train=oversample_trainset(train)
-    print(oversampled_train[-100:].to_dict)
-    input()
+    print(f"Train (ORIGINAL): {train.shape[0]} samples")
+    oversampled_train=oversample_trainset_old(train)
+    print(f"Train (OVERSAMPLE): {oversampled_train.shape[0]} samples")
     print("FINISHED OVERSAMPLING TRAIN")
     with open(city+"/IMGMODEL/data_10+10/TRAIN_TXT", "wb") as f:
         pickle.dump(oversampled_train, f)
     print(oversampled_train.shape)
     
     print(train_and_val)
-    oversampled_train_and_val=oversample_trainset(train_and_val,test=True)
+    oversampled_train_and_val=oversample_trainset_old(train_and_val)
     with open(city+"/IMGMODEL/data_10+10/TRAIN_DEV_TXT", "wb") as f:
         pickle.dump(oversampled_train_and_val, f)
     
@@ -336,7 +338,7 @@ else:
     # Oversample Test sets (VAL and TEST)
     #==================================
     
-    def oversample_testset1(test,train):
+    def oversample_testset_new(test,train):
         restaurant_groups = train.groupby(["restaurant_id","is_image"])
         i=0
         rows=[]
@@ -346,8 +348,6 @@ else:
         for _, row in test.iterrows():
             if id_test%10000==0: print
             id_test+=1
-            r=row.to_dict()
-            r["id_test"]=id_test
             
             if (row["restaurant_id"],row["is_image"]) in restaurant_groups.groups:
                 restaurant=restaurant_groups.get_group((row["restaurant_id"],row["is_image"])).copy()
@@ -357,8 +357,10 @@ else:
                 restaurant.rename(columns={'take':'is_dev'}, inplace=True)
                 restaurant["is_dev"]=0
                 restaurant["id_test"]=id_test
+                r=row.to_dict()
+                r["id_test"]=id_test
                 if restaurant.shape[0]!=0:
-                    rows.append(row.to_dict())
+                    rows.append(r)
                     restaurant=restaurant.to_dict(orient='records')
                     for e in restaurant:
                         rows.append(e)
@@ -368,10 +370,10 @@ else:
         print("created df")
         return aux
 
-    def oversample_testset(test,train):
+    def oversample_testset_old(test,train):
         rows=[]
         id_test=0
-        for index, row in test.iterrows():
+        for _, row in test.iterrows():
             id_test+=1
             r=row.to_dict()
             r["id_test"]=id_test
@@ -400,7 +402,7 @@ else:
         return aux
           
     print(val.shape)
-    oversampled_val=oversample_testset(val,train)
+    oversampled_val=oversample_testset_old(val,train)
     print("done")
     
     with open(city+"/IMGMODEL/data_10+10/DEV_TXT", "wb") as f:
@@ -408,7 +410,7 @@ else:
     print(oversampled_val.shape)
     
     print(test.shape)
-    oversampled_test=oversample_testset(test,train_and_val)
+    oversampled_test=oversample_testset_old(test,train_and_val)
     with open(city+"/IMGMODEL/data_10+10/TEST_TXT", "wb") as f:
         pickle.dump(oversampled_test, f)
     print(oversampled_test.shape)

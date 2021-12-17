@@ -181,6 +181,56 @@ class ImgModel(ModelClass):
 
 		return model_take
 
+	def get_model2(self):
+
+		# Fijar las semillas de numpy y TF
+		np.random.seed(self.SEED)
+		random.seed(self.SEED)
+		tf.compat.v1.set_random_seed(self.SEED)
+
+		emb_size = 256
+
+		usr_emb_size = emb_size
+		img_emb_size = emb_size
+
+		print(self.DATA["V_TXT"])
+		print(self.DATA["N_USR"])
+		
+		#USERS EMBEDDING
+		model_u = Sequential()
+		model_u.add(Embedding(self.DATA["N_USR"], usr_emb_size, input_shape=(1,), name="in_usr"))
+		print(model_u.output.shape)
+		model_u.add(Flatten())
+
+		#IMAGE EMBEDDING
+		model_i = Sequential()
+		model_i.add(Dense(img_emb_size, input_shape=(768,), name="in_img"))
+
+		
+		print(model_u.input.shape, model_i.input.shape)
+		print(model_u.output.shape, model_i.output.shape)
+		
+		#DOT PRODUCT
+		concat=Dot(axes=1)([model_u.output, model_i.output])
+		
+		# concat = Concatenate(axis=1)([model_u.output, model_i.output])
+		# concat = Activation("relu")(concat)
+		# concat = Dropout(self.CONFIG["dropout"])(concat)
+
+		# concat = Dense(emb_size)(concat)
+		# concat = Activation("relu")(concat)
+		# concat = Dropout(self.CONFIG["dropout"])(concat)
+
+		# concat = Dense(1)(concat)
+		conc_take_out = Activation("sigmoid")(concat)
+
+		opt = Adam(lr=self.CONFIG["learning_rate"])
+
+		model_take = Model(inputs=[model_u.input, model_i.input], outputs=conc_take_out)
+		model_take.compile(loss="binary_crossentropy", optimizer=opt, metrics=["accuracy"])
+
+		return model_take
+
 	def train(self, sq_take,val_take):
 
 		def _train(model, data,valdata):
@@ -205,6 +255,12 @@ class ImgModel(ModelClass):
 
 		take_ret = _train(self.MODEL, sq_take,val_take)
 		ret["T_LOSS"] = take_ret.history['loss'][0]
+
+		preds=self.MODEL.predict_generator(sq_take, steps=sq_take.__len__(), use_multiprocessing=False, workers=6)[:,0]
+		# print(list(preds[::4102]))
+		# print(np.where(preds==0.5)[0])
+		# print(np.sum(preds>0.5)/preds.shape[0])
+
 
 		return take_ret.history
 
@@ -265,7 +321,6 @@ class ImgModel(ModelClass):
 	class TrainSequenceTake(Sequence):
 
 		def __init__(self, data, batch_size, model):
-			print(data.shape)
 			self.DATA = data
 			self.MODEL = model
 			self.BATCHES = np.array_split(data, len(data) // batch_size)
@@ -277,13 +332,12 @@ class ImgModel(ModelClass):
 
 		def __getitem__(self, idx):
 			data_ids = self.BATCHES[idx]
-
-			imgs = self.MODEL.DATA["CONTENTS"][data_ids.content_id.values]
-			txts = self.MODEL.DATA["CONTENTS"][data_ids.content_id.values][:,:768]
+			# print("Getting batch ",idx," of ",len(self.BATCHES), ", which has size ",data_ids.shape[0])
+			imgs = self.MODEL.DATA["TXT"][data_ids.content_id.values]
+			txts = self.MODEL.DATA["TXT"][data_ids.content_id.values][:,:768]
 			# print(np.array(data_ids.user_id.values).shape)
 			# print(np.array(data_ids[["take"]].values.shape))
-			print(txts)
-			return ([np.array(data_ids.user_id.values), imgs, txts, np.array(data_ids.is_image.values), 1-np.array(data_ids.is_image.values)],
+			return ([np.array(data_ids.user_id.values),imgs,txts,np.array(data_ids.is_image.values),1-np.array(data_ids.is_image.values)],
 					[np.array(data_ids[["take"]].values)])
 
 	class DevSequenceTake(Sequence):
@@ -301,9 +355,10 @@ class ImgModel(ModelClass):
 		def __getitem__(self, idx):
 			data_ids = self.BATCHES[idx]
 
-			imgs = self.MODEL.DATA["CONTENTS"][data_ids.content_id.values]
-			txts = self.MODEL.DATA["CONTENTS"][data_ids.content_id.values][:,:768]
-			return ([np.array(data_ids.user_id.values), imgs, txts, np.array(data_ids.is_image.values), 1- np.array(data_ids.is_image.values)],[np.array(data_ids[["is_dev"]].values)])
+			imgs = self.MODEL.DATA["TXT"][data_ids.content_id.values]
+			txts = self.MODEL.DATA["TXT"][data_ids.content_id.values][:,:768]
+			return ([np.array(data_ids.user_id.values),imgs,txts,np.array(data_ids.is_image.values),1-np.array(data_ids.is_image.values)],
+					[np.array(data_ids[["is_dev"]].values)])
 
 
 	####################################################################################################################
@@ -560,7 +615,7 @@ class ImgModel(ModelClass):
 			RST_CNTS = pd.DataFrame(columns=["restaurant_id", "vector"])
 
 			for i, g in TRAIN.groupby("restaurant_id"):
-				all_c = self.DATA["CONTENTS"][g.content_id.values, :]
+				all_c = self.DATA["TXT"][g.content_id.values, :]
 				cnt = np.mean(all_c, axis=0)
 
 				RST_CNTS = RST_CNTS.append({"restaurant_id": i, "vector": cnt}, ignore_index=True)
@@ -575,7 +630,7 @@ class ImgModel(ModelClass):
 			# print(id_rest)
 			item = ITEMS.loc[ITEMS.restaurant_id == id_rest].vector.values[0]
 
-			rst_imgs = self.DATA["CONTENTS"][g.content_id.values, :]
+			rst_imgs = self.DATA["TXT"][g.content_id.values, :]
 			dsts = spatial.distance.cdist(rst_imgs, [item], 'euclidean')
 
 			g["dsts"] = dsts
@@ -677,7 +732,7 @@ class ImgModel(ModelClass):
 			RST_CNTS = pd.DataFrame(columns=["restaurant_id", "vector"])
 
 			for i, g in TRAIN.groupby("restaurant_id"):
-				all_c = self.DATA["CONTENTS"][g.content_id.values, :]
+				all_c = self.DATA["TXT"][g.content_id.values, :]
 				cnt = np.mean(all_c, axis=0)
 
 				RST_CNTS = RST_CNTS.append({"restaurant_id": i, "vector": cnt}, ignore_index=True)
@@ -690,7 +745,7 @@ class ImgModel(ModelClass):
 			id_rest = g.restaurant_id.unique()[0]
 			item = ITEMS.loc[ITEMS.restaurant_id == id_rest].vector.values[0]
 
-			rst_imgs = self.DATA["CONTENTS"][g.content_id.values, :]
+			rst_imgs = self.DATA["TXT"][g.content_id.values, :]
 			dsts = spatial.distance.cdist(rst_imgs, [item], 'euclidean')
 
 			g["dsts"] = dsts
@@ -886,10 +941,10 @@ class ImgModel(ModelClass):
 		# DROP USERS WITH LESS THAN 10 IMAGES (POOR KNOWLEDGE ABOUT THEM)
 		# -----------------------------------------------------------------------------------------------------------
 
-		# n_user_img = 10
+		n_user_img = 10
 
-		# ret_f = ret10.loc[(ret10["n_photos_train"] >= n_user_img)]
-		ret_f=ret10
+		ret_f = ret10.loc[(ret10["n_photos_train"] >= n_user_img)]
+		# ret_f=ret10
 		# -----------------------------------------------------------------------------------------------------------
 		# TIMES IN EACH POSITION
 		# -----------------------------------------------------------------------------------------------------------
@@ -1152,7 +1207,7 @@ class ImgModel(ModelClass):
 	def get_data(self, load):
 
 		if load is None:
-			load = ["TRAIN_TXT", "TRAIN_DEV_TXT", "DEV_TXT", "TEST_TXT", "CONTENTS", "N_USR", "V_TXT"]
+			load = ["TRAIN_TXT", "TRAIN_DEV_TXT", "DEV_TXT", "TEST_TXT", "TXT", "N_USR", "V_TXT"]
 
 		# Look if data already exists
 		# --------------------------------------------------------------------------------------------------------------

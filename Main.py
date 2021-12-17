@@ -38,7 +38,7 @@ stage = "test" if args.stage is None else args.stage
 
 gpu = np.argmin(list(map(lambda x: x["mem_used_percent"], nvgpu.gpu_info()))) if args.gpu is None else args.gpu
 
-lrates = [4e-5] if args.lr is None else args.lr
+lrates = [5e-4] if args.lr is None else args.lr
 dpouts = [0.2] if args.d is None else args.d
 nimg = "10+10" if args.nimg is None else args.nimg
 epochs = [25] if args.e is None else args.e
@@ -52,7 +52,7 @@ config = {
         "learning_rate": lrates[0],
         "epochs": epochs[0],
 		"dropout": dpouts[0],
-        "batch_size": 2**8 if city in ["gijon", "coruna"] else 2**12
+        "batch_size": 2**8 if city in ["gijon", "coruna"] else 2**15
 						
 						  # Our GPU can handle this size
         }
