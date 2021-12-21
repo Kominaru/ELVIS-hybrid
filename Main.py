@@ -69,7 +69,7 @@ if "grid" in stage:
     model.grid_search(params, max_epochs=epochs, start_n_epochs=epochs)
 
 if "train" in stage:
-    model.final_train(epochs=15, save=True)
+    model.final_train(epochs=25, save=True)
 
 if "test" in stage:
 

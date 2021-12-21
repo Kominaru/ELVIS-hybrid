@@ -256,12 +256,7 @@ class ImgModel(ModelClass):
 		take_ret = _train(self.MODEL, sq_take,val_take)
 		ret["T_LOSS"] = take_ret.history['loss'][0]
 
-		preds=self.MODEL.predict_generator(sq_take, steps=sq_take.__len__(), use_multiprocessing=False, workers=6)[:,0]
-		# print(list(preds[::4102]))
-		# print(np.where(preds==0.5)[0])
-		# print(np.sum(preds>0.5)/preds.shape[0])
-
-
+		preds=self.MODEL.predict_generator(val_take, steps=sq_take.__len__(), use_multiprocessing=False, workers=6)[:,0]
 		return take_ret.history
 
 	def dev(self, sq_take):
@@ -332,14 +327,17 @@ class ImgModel(ModelClass):
 
 		def __getitem__(self, idx):
 			data_ids = self.BATCHES[idx]
-			# print("Getting batch ",idx," of ",len(self.BATCHES), ", which has size ",data_ids.shape[0])
+			
 			imgs = self.MODEL.DATA["TXT"][data_ids.content_id.values]
-			txts = self.MODEL.DATA["TXT"][data_ids.content_id.values][:,:768]
 			# print(np.array(data_ids.user_id.values).shape)
 			# print(np.array(data_ids[["take"]].values.shape))
-			assert np.min(imgs)>=0
-			return ([np.array(data_ids.user_id.values),imgs],
-					[np.array(data_ids[["take"]].values)])
+
+
+			take_info=np.array(data_ids["take"].values)
+
+			assert 	not np.any(np.all((imgs == 0), axis=1))
+			return 	([np.array(data_ids.user_id.values),imgs],
+					[take_info])
 
 	class DevSequenceTake(Sequence):
 
@@ -355,9 +353,10 @@ class ImgModel(ModelClass):
 
 		def __getitem__(self, idx):
 			data_ids = self.BATCHES[idx]
-
-			imgs = self.MODEL.DATA["TXT"][data_ids.content_id.values]
+			imgs = self.MODEL.DATA["TXT"][data_ids.content_id.values][:,:1536]
 			txts = self.MODEL.DATA["TXT"][data_ids.content_id.values][:,:768]
+
+			assert 	not np.any(np.all((imgs == 0), axis=1))
 			return ([np.array(data_ids.user_id.values),imgs],
 					[np.array(data_ids[["is_dev"]].values)])
 
