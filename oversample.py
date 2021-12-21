@@ -9,28 +9,7 @@ import os
 information=""
 # tokenizer = BertTokenizer.from_pretrained('bert-base-uncased') 
 # model = TFBertModel.from_pretrained("bert-base-uncased",output_hidden_states=True)
-# def plot_hist(data, column, title="Histogram", title_x="X Axis", title_y="Y Axis", bins=10, save=None):
 
-    # plt.ioff()
-
-    # items = bins
-
-    # plt.hist(data[str(column)], bins=range(1, items + 2), edgecolor='black',
-             # align="left")  # arguments are passed to np.histogram
-    # labels = list(map(lambda x: str(x), range(1, items + 1)))
-    # labels[-1] = "≥" + labels[-1]
-    # plt.xticks(range(1, items + 1), labels)
-    # plt.title(str(title))
-
-    # plt.xlabel(title_x)
-    # plt.ylabel(title_y)
-
-    # if save is None:
-        # plt.show()
-    # else:
-        # plt.savefig(str(save))
-
-    # plt.close()
 
 f = open("datasetinfo.txt", "a")
 	
