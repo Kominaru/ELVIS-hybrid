@@ -17,14 +17,14 @@ from random import choice
 def extract_user_id(raw_user_id):
     return raw_user_id.split('_')[1][:-4]
 
-city="delhi"
+city="losangeles"
 
 makedirs(f"{city}/IMGMODEL/data_10+10/",exist_ok=True)
 makedirs(f"{city}/IMGMODEL/original_take/",exist_ok=True)
 
 #Read CSV
 df=pd.read_csv(f"{city}.csv")
-df["photos"]=pd.Series(dtype=object)
+# df["photos"]=pd.Series(dtype=object)
 print(df["photos"])
 #Drop irrelevant columns
 df=df.drop(['parse_count','author','sample','rating_review','title_review','review_preview','url_review','date','city','url_restaurant'],axis=1)
@@ -66,12 +66,14 @@ df = df.drop(["review_full","photos"],axis=1)
 #Fabricate review IDs
 print(f"Total review count after removing invalid userids: {df.shape[0]} -> ",end="")
 df=df[df["content"].notna()]
+df["is_image"]=df.apply(lambda x: 1 if x.content[:5]=="https" else 0,axis=1)
+df=df[df["is_image"]==1]
 df["content_id"]=np.arange(0,df.shape[0]).tolist()
 df = df.drop('review_id',axis=1)
 print(df.shape[0])
 #Add text/image flag
 
-df["is_image"]=df.apply(lambda x: 1 if x.content[:5]=="https" else 0,axis=1)
+
 
 #Separate the contents to start translation, drop column from df
 contents=df["content"].to_numpy()
@@ -178,11 +180,8 @@ else:
         morethan2=data[((data["user_id"].isin(counts_images.index[counts_images.gt(1)]))&(data["is_image"]==1))|((data["user_id"].isin(counts_texts.index[counts_texts.gt(1)]))&(data["is_image"]==0))]
         test=morethan2.groupby(['user_id','is_image']).nth(0).reset_index()
         print(f"Total test samples: {test.shape[0]}")
-        input()
         train=pd.concat([data,test]).drop_duplicates(keep=False)
         return train, test
-    
-    df=df[df["is_image"]==0]
     
     train_and_val,test=separate_train_test(df)
     train,val=separate_train_test(train_and_val)
@@ -248,12 +247,12 @@ else:
         rows=[]
         image_restaurant_ids=pd.unique(train[train["is_image"]==1]["restaurant_id"].to_list())
         text_restaurant_ids=pd.unique(train[train["is_image"]==0]["restaurant_id"].to_list())
+
         for index, row in train.iterrows():
-            if index%10000==0: print(i)
-            # print(row)
+            print(f"Oversampling sample {i}/{len(train)}...",end="\r")
             #For each review (u,r), add then negative samples (u,r') where r' is a photo of the **same** restaurant taken by a different user u'
             # same_restaurant=(train.loc[(train["user_id"]!=row["user_id"]) & (train["restaurant_id"]==row["restaurant_id"])]).copy()ç
-            sampled_rows=restaurant_groups.get_group((row["restaurant_id"],row["is_image"])).copy()
+            sampled_rows=restaurant_groups.get_group((row["restaurant_id"],row["is_image"]))
             sampled_rows=sampled_rows[sampled_rows["user_id"]!=row["user_id"]]
             if not sampled_rows.empty: 
                 sampled_rows=sampled_rows.sample(n=10,replace=True)
@@ -265,25 +264,19 @@ else:
                     rows.append(e)
             
             #For each review (u,r), add then negative samples (u,r') where r' is a photo of a **different** restaurant taken by a different user u'
-            different_restaurant_id=row["restaurant_id"]
-            for _ in range(10):
-                while different_restaurant_id==row["restaurant_id"]:
-                    different_restaurant_id = choice(image_restaurant_ids) if row["is_image"] else choice(text_restaurant_ids)
-                sampled_rows=restaurant_groups.get_group((different_restaurant_id,row["is_image"])).copy()
-                sampled_rows=sampled_rows[sampled_rows["user_id"]!=row["user_id"]]
-                if not sampled_rows.empty:
-                    sampled_rows=sampled_rows.sample(n=1)
-                    sampled_rows["content_id"]=row["content_id"]
-                    sampled_rows["take"]=0
-                    sampled_rows=sampled_rows.to_dict(orient='records')
-                    for e in sampled_rows:
-                        rows.append(e)    
+
+            different_restaurant=(train.loc[(train["user_id"]!=row["user_id"]) & (train["restaurant_id"]!=row["restaurant_id"]) & (train["is_image"]==row["is_image"])]).copy()
+            different_restaurant=different_restaurant.sample(n=10,replace=True)
+            different_restaurant["content_id"]=row["content_id"]
+            different_restaurant["take"]=0
                 
             #Oversample the original review to compensate for the negative samples added
             row=row.to_dict()
             for _ in range(19):
                 rows.append(row)
+
             i+=1
+        
         return newtrain.append(pd.DataFrame(rows),ignore_index=True)
         
     def oversample_trainset_old(train):
@@ -318,9 +311,15 @@ else:
             #Oversample the original review to compensate for the negative samples added
             for r in range(19):
                 rows.append(row.to_dict())
+            
+
             i+=1
         return newtrain.append(pd.DataFrame(rows),ignore_index=True)
-        
+    
+    oversampled_train_and_val=oversample_trainset_old(train_and_val)
+    with open(city+"/IMGMODEL/data_10+10/TRAIN_DEV_TXT", "wb") as f:
+        pickle.dump(oversampled_train_and_val, f)
+
     print(f"Train (ORIGINAL): {train.shape[0]} samples")
     oversampled_train=oversample_trainset_old(train)
     print(f"Train (OVERSAMPLE): {oversampled_train.shape[0]} samples")
@@ -330,9 +329,7 @@ else:
     print(oversampled_train.shape)
     
     print(train_and_val)
-    oversampled_train_and_val=oversample_trainset_old(train_and_val)
-    with open(city+"/IMGMODEL/data_10+10/TRAIN_DEV_TXT", "wb") as f:
-        pickle.dump(oversampled_train_and_val, f)
+    
     
     #==================================
     # Oversample Test sets (VAL and TEST)
@@ -346,7 +343,7 @@ else:
         image_restaurant_ids=pd.unique(train[train["is_image"]==1]["restaurant_id"].to_list())
         text_restaurant_ids=pd.unique(train[train["is_image"]==0]["restaurant_id"].to_list())
         for _, row in test.iterrows():
-            if id_test%10000==0: print
+
             id_test+=1
             
             if (row["restaurant_id"],row["is_image"]) in restaurant_groups.groups:
@@ -380,10 +377,9 @@ else:
             
             
             #For each review (u,r), add negative samples (u,r') for all photos r' taken of the **same** restaurant by a different user.
-            same_restaurant=(train.loc[(train["user_id"]!=row["user_id"]) & (train["restaurant_id"]==row["restaurant_id"]) & (train["is_image"]==row["is_image"])]).copy()
+            same_restaurant=(train.loc[(train["user_id"]!=row["user_id"]) & (train["restaurant_id"]==row["restaurant_id"]) & (train["is_image"]==row["is_image"])])
             
             if same_restaurant.shape[0]>100: same_restaurant=same_restaurant.sample(n=100)
-            if id_test%10000==0: print
             same_restaurant["user_id"]=row["user_id"]
             same_restaurant.rename(columns={'take':'is_dev'}, inplace=True)
             same_restaurant["is_dev"]=0

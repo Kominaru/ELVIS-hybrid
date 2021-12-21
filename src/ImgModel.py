@@ -127,7 +127,7 @@ class ImgModel(ModelClass):
 		return model_take
 	
 
-	def get_model(self):
+	def get_model2(self):
 
 		# Fijar las semillas de numpy y TF
 		np.random.seed(self.SEED)
@@ -181,7 +181,7 @@ class ImgModel(ModelClass):
 
 		return model_take
 
-	def get_model2(self):
+	def get_model(self):
 
 		# Fijar las semillas de numpy y TF
 		np.random.seed(self.SEED)
@@ -204,7 +204,7 @@ class ImgModel(ModelClass):
 
 		#IMAGE EMBEDDING
 		model_i = Sequential()
-		model_i.add(Dense(img_emb_size, input_shape=(768,), name="in_img"))
+		model_i.add(Dense(img_emb_size, input_shape=(1536,), name="in_img"))
 
 		
 		print(model_u.input.shape, model_i.input.shape)
@@ -337,7 +337,8 @@ class ImgModel(ModelClass):
 			txts = self.MODEL.DATA["TXT"][data_ids.content_id.values][:,:768]
 			# print(np.array(data_ids.user_id.values).shape)
 			# print(np.array(data_ids[["take"]].values.shape))
-			return ([np.array(data_ids.user_id.values),imgs,txts,np.array(data_ids.is_image.values),1-np.array(data_ids.is_image.values)],
+			assert np.min(imgs)>=0
+			return ([np.array(data_ids.user_id.values),imgs],
 					[np.array(data_ids[["take"]].values)])
 
 	class DevSequenceTake(Sequence):
@@ -357,7 +358,7 @@ class ImgModel(ModelClass):
 
 			imgs = self.MODEL.DATA["TXT"][data_ids.content_id.values]
 			txts = self.MODEL.DATA["TXT"][data_ids.content_id.values][:,:768]
-			return ([np.array(data_ids.user_id.values),imgs,txts,np.array(data_ids.is_image.values),1-np.array(data_ids.is_image.values)],
+			return ([np.array(data_ids.user_id.values),imgs],
 					[np.array(data_ids[["is_dev"]].values)])
 
 

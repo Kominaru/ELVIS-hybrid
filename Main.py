@@ -52,7 +52,7 @@ config = {
         "learning_rate": lrates[0],
         "epochs": epochs[0],
 		"dropout": dpouts[0],
-        "batch_size": 2**8 if city in ["gijon", "coruna"] else 2**15
+        "batch_size": 2**8 if city in ["gijon", "coruna"] else 2**13
 						
 						  # Our GPU can handle this size
         }
@@ -69,7 +69,7 @@ if "grid" in stage:
     model.grid_search(params, max_epochs=epochs, start_n_epochs=epochs)
 
 if "train" in stage:
-    model.final_train(epochs=50, save=True)
+    model.final_train(epochs=15, save=True)
 
 if "test" in stage:
 
