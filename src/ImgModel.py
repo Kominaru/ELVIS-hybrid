@@ -46,6 +46,7 @@ def get_img(url, save=None):
 
 def get_image_pos(data):
 	# Ordenar los restaurantes por predición
+	
 	data = data.sort_values(["id_test", "prediction"])
 
 	# Crear una lista de posiciones en función del número de imágenes de cada restaurante
@@ -55,7 +56,6 @@ def get_image_pos(data):
 
 	# Obtener el número de imágenes de cada restaurante
 	rest_data = data.groupby("restaurant_id").model_pos.max().reset_index(name="n_photos")
-	print(rest_data)
 	
 	data_dev = data.loc[data.is_dev == 1]
 	data_dev = data_dev.merge(rest_data, on="restaurant_id")
@@ -75,6 +75,7 @@ class ImgModel(ModelClass):
 	def __init__(self, city, config, seed=2, model_name="imgModel", load=None):
 
 		ModelClass.__init__(self, city, config, model_name, seed=seed, load=load)
+		self.content_type=[0]
 
 	def stop(self):
 
@@ -127,7 +128,7 @@ class ImgModel(ModelClass):
 		return model_take
 	
 
-	def get_model2(self):
+	def get_model(self):
 
 		# Fijar las semillas de numpy y TF
 		np.random.seed(self.SEED)
@@ -181,7 +182,7 @@ class ImgModel(ModelClass):
 
 		return model_take
 
-	def get_model(self):
+	def get_model2(self):
 
 		# Fijar las semillas de numpy y TF
 		np.random.seed(self.SEED)
@@ -256,7 +257,8 @@ class ImgModel(ModelClass):
 		take_ret = _train(self.MODEL, sq_take,val_take)
 		ret["T_LOSS"] = take_ret.history['loss'][0]
 
-		preds=self.MODEL.predict_generator(val_take, steps=sq_take.__len__(), use_multiprocessing=False, workers=6)[:,0]
+		# preds=self.MODEL.predict_generator(val_take, steps=val_take.__len__(), use_multiprocessing=False, workers=6)[:,0]
+		# print(list(preds[::5000]))
 		return take_ret.history
 
 	def dev(self, sq_take):
@@ -282,10 +284,10 @@ class ImgModel(ModelClass):
 	def test(self):
 
 		def get_img_probs(model):
-			test_sequence_take = self.DevSequenceTake(self.DATA["TEST_TXT"], self.CONFIG['batch_size'], self)
+			
+			dts=self.DATA["TEST_TXT"][self.DATA["TEST_TXT"]["is_image"].isin(self.content_type)]
+			test_sequence_take = self.DevSequenceTake(dts, self.CONFIG['batch_size'], self)
 
-			dts = self.DATA["TEST_TXT"].copy()
-		
 			prs = model.predict_generator(test_sequence_take, steps=test_sequence_take.__len__(),
 										  use_multiprocessing=False, workers=6)
 
@@ -327,22 +329,22 @@ class ImgModel(ModelClass):
 
 		def __getitem__(self, idx):
 			data_ids = self.BATCHES[idx]
-			
+			assert self.MODEL.DATA["TXT"].shape==(287199,1536)
 			imgs = self.MODEL.DATA["TXT"][data_ids.content_id.values]
+			txts = self.MODEL.DATA["TXT"][data_ids.content_id.values][:,:768]
 			# print(np.array(data_ids.user_id.values).shape)
 			# print(np.array(data_ids[["take"]].values.shape))
-
 
 			take_info=np.array(data_ids["take"].values)
 
 			assert 	not np.any(np.all((imgs == 0), axis=1))
-			return 	([np.array(data_ids.user_id.values),imgs],
+			
+			return 	([np.array(data_ids.user_id.values),imgs,txts,np.array(data_ids.is_image.values),1-np.array(data_ids.is_image.values)],
 					[take_info])
 
 	class DevSequenceTake(Sequence):
 
 		def __init__(self, data, batch_size, model):
-			print(data.shape)
 			self.DATA = data
 			self.MODEL = model
 			self.BATCHES = np.array_split(data, len(data) // batch_size)
@@ -353,11 +355,11 @@ class ImgModel(ModelClass):
 
 		def __getitem__(self, idx):
 			data_ids = self.BATCHES[idx]
-			imgs = self.MODEL.DATA["TXT"][data_ids.content_id.values][:,:1536]
+			imgs = self.MODEL.DATA["TXT"][data_ids.content_id.values]
 			txts = self.MODEL.DATA["TXT"][data_ids.content_id.values][:,:768]
 
 			assert 	not np.any(np.all((imgs == 0), axis=1))
-			return ([np.array(data_ids.user_id.values),imgs],
+			return ([np.array(data_ids.user_id.values),imgs,txts,np.array(data_ids.is_image.values),1-np.array(data_ids.is_image.values)],
 					[np.array(data_ids[["is_dev"]].values)])
 
 
@@ -444,14 +446,11 @@ class ImgModel(ModelClass):
 			# devel=devel.merge(data["user_id"], left_on="user_id", right_on="user_id")
 		
 			td=self.DATA["TRAIN_TXT"]
-			print("td size:", td.shape)
 			devel1=self.DATA["DEV_TXT"]
 			# print(self.DATA["TEST_TXT"])
-			print(devel1.shape)
 			td=td.merge(devel1,left_on=["user_id","restaurant_id","content_id"], right_on=["user_id","restaurant_id","content_id"])
-			print(td.shape)
 			# print(td.columns.values)
-			train_sequence_take = self.TrainSequenceTake(self.DATA["TRAIN_TXT"][self.DATA["TRAIN_TXT"]["is_image"]==0], self.CONFIG['batch_size'], self)
+			train_sequence_take = self.TrainSequenceTake(self.DATA["TRAIN_TXT"][self.DATA["TRAIN_TXT"]["is_image"].isin(self.content_type)], self.CONFIG['batch_size'], self)
 			dev_sequence_take = self.DevSequenceTake(self.DATA["DEV_TXT"], self.CONFIG['batch_size'], self)
 			
 			# test=devel1.merge(self.DATA["TRAIN_TXT"],left_on="content_id", right_on="content_id")
@@ -549,7 +548,6 @@ class ImgModel(ModelClass):
 		
 		# print(devel1.shape)
 		td=td.merge(devel1,left_on=["user_id","restaurant_id","content_id"], right_on=["user_id","restaurant_id","content_id"])
-		print(td.shape)
 		# print(td.columns.values)
 		train_sequence_take = self.TrainSequenceTake(self.DATA["TRAIN_DEV_TXT"], self.CONFIG['batch_size'], self)
 		dev_sequence_take = self.DevSequenceTake(self.DATA["TEST_TXT"], self.CONFIG['batch_size'], self)
@@ -600,9 +598,11 @@ class ImgModel(ModelClass):
 
 			if (test == False):
 				TRAIN = get_pickle(path, "TRAIN_DEV")
+				TRAIN=TRAIN[TRAIN["is_image"].isin(self.content_type)]
 				
 			else:
 				TRAIN = get_pickle(path, "TRAIN_DEV")
+				TRAIN=TRAIN[TRAIN["is_image"].isin(self.content_type)]
 
 			# Añadir las imágenes a TRAIN
 			# TRAIN = TRAIN.merge(self.DATA["IMG"][["review", "content_id"]], left_on="reviewId", right_on="review")
@@ -663,7 +663,6 @@ class ImgModel(ModelClass):
 
 		RST_CNTS = getCentroids(TRAIN)
 
-		print(RST_CNTS)
 		# Para cada caso de DEV, calcular el resultado de los baselines
 		# ---------------------------------------------------------------------------------------------------------------
 
@@ -674,6 +673,7 @@ class ImgModel(ModelClass):
 			ITEMS = self.DATA["DEV_TXT"]
 		else:
 			ITEMS = self.DATA["TEST_TXT"]
+			ITEMS = ITEMS[ITEMS["is_image"].isin(self.content_type)]
 
 		for i, g in ITEMS.groupby("id_test"):
 			
@@ -721,7 +721,7 @@ class ImgModel(ModelClass):
 			path = file_path + "/original_take/"
 
 			TRAIN = get_pickle(path, "TRAIN_DEV")
-
+			TRAIN=TRAIN[TRAIN["is_image"].isin(self.content_type)]
 			# Añadir las imágenes a TRAIN
 			TRAIN = TRAIN.merge(self.DATA["IMG"][["review", "content_id"]], left_on="reviewId", right_on="review")
 			TRAIN = TRAIN.drop(columns=['review'])
@@ -774,6 +774,7 @@ class ImgModel(ModelClass):
 		# ---------------------------------------------------------------------------------------------------------------
 
 		ITEMS = self.DATA["TEST_TXT"]
+		ITEMS = ITEMS[ITEMS["is_image"].isin(self.content_type)]
 		ITEMS = ITEMS.loc[ITEMS.id_test == id_test]
 
 		return getPos(ITEMS, RST_CNTS)
@@ -787,7 +788,7 @@ class ImgModel(ModelClass):
 			# Add imgs
 			# train = train.merge(self.DATA["IMG"][["review", "content_id"]], left_on="reviewId", right_on="review")
 			# train = train.drop(columns=['review'])
-
+			train=train[train["is_image"].isin(self.content_type)]
 			train = train.groupby("user_id").apply(lambda x: pd.Series({"n_photos_train": len(x.content_id.unique()),
 																		"n_rest_train": len(
 																			x.restaurant_id.unique())})).reset_index()
@@ -1026,11 +1027,9 @@ class ImgModel(ModelClass):
 		# usrs = original_train.groupby("user_id").content_id.count().reset_index(name="n_images")
 		# usrs = usrs.loc[usrs.n_images>=10].user_id.values
 		# preds = preds.loc[preds.user_id.isin(usrs)]
-
+		
 		for i, mdl in preds.groupby("id_test"):
 
-			ids = range(0,12000)  # BARCELONA => 11537: 13588 2769 (Exteriores)
-			if (i not in ids): continue
 			print(mdl.user_id.values[0], mdl.restaurant_id.values[0])
 
 			n_imgs = 11
@@ -1218,7 +1217,7 @@ class ImgModel(ModelClass):
 		print(file_path)
 		print(os.path.exists(file_path))
 
-		if os.path.exists(file_path) and len(os.listdir(file_path)) == len(load):
+		if os.path.exists(file_path) and len(os.listdir(file_path)) >= len(load):
 
 			print_g("Loading previous generated data...")
 

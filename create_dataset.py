@@ -71,7 +71,6 @@ df = df.drop('restaurant_name',axis=1)
 print(f"Total unique restaurants: {df['restaurant_id'].unique().shape[0]}")
 
 #Split photos column into actual lists
-# df = df[df["user_id"].isin(df[df["photos"].notna()]['user_id'].unique())]
 df = df.assign(photos=df.photos.str.split(','))
 df["photos"]=df["photos"].apply(lambda x: [""] if x is NaN else x+[""] ) #We add an additional element to each list so we can have a row for the review as well
 
@@ -92,18 +91,25 @@ df["content"]=df.apply(lambda x : x.review_full if x["photos"]=="" else x["photo
 df = df.drop(["review_full","photos"],axis=1)
 
 #Fabricate review IDs
+print(df['user_id'].unique().shape[0])
 print(f"Total review count after removing invalid userids: {df.shape[0]} -> ",end="")
 df=df[df["content"].notna()]
+
 df["is_image"]=df.apply(lambda x: 1 if x.content[:5]=="https" else 0,axis=1)
-df=df[df["is_image"]==1] #WIP: Currently trying to obtain image-only results
+# df=df[df["is_image"]==0] #WIP: Currently trying to obtain image-only results
+# df = df[df["user_id"].isin(df[df["is_image"]==1]['user_id'].unique())]
+df = df.assign(user_id=(df["user_id"]).astype('category').cat.codes)
+print(f"Total unique users: {df['user_id'].unique().shape[0]}")
 df["content_id"]=np.arange(0,df.shape[0]).tolist()
 df = df.drop('review_id',axis=1)
 print(df.shape[0])
 #Add text/image flag
 
-
-df = df.assign(user_id=(df["user_id"]).astype('category').cat.codes)
-print(f"Total unique users: {df['user_id'].unique().shape[0]}")
+print(df['user_id'].unique().shape[0])
+print(df["user_id"].unique())
+print(np.max(df["user_id"].unique()))
+print(np.min(df["user_id"].unique()))
+input()
 #Separate the contents to start translation, drop column from df
 contents=df["content"].to_numpy()
 df = df.drop('content',axis=1)
