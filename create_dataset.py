@@ -184,11 +184,11 @@ if sys.argv[1]=="embeds":
         print(f"\033[K Processing images... image {i+1}/{len(images)}",end="\r")
         new_images.append(embed_image(batch))
 
-    # new_images=np.vstack(new_images)
+    new_images=np.vstack(new_images)
     contents=np.zeros((contents.shape[0],1536))
 
-    # images_mask=(df["is_image"]==1).to_numpy()
-    # contents[images_mask]=new_images
+    images_mask=(df["is_image"]==1).to_numpy()
+    contents[images_mask]=new_images
 
     print("\n")
     for i,batch in enumerate(texts):
