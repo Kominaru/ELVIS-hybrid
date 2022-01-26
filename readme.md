@@ -1,3 +1,7 @@
+## Write-up
+
+https://www.overleaf.com/project/61d0a7713f346c0e13093699
+
 ## Aim
 
 Build a formal framework that estimates the authorship probability for a given pair (user, photo).  
